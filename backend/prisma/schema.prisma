@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------
+// ENUMS
+// -------------------------------------------------------------
+enum UserRole {
+  ADMIN
+  DRIVER
+  PLANT_OPERATOR
+}
+
+enum VehicleType {
+  FOUR_WHEELER
+  SIX_WHEELER
+}
+
+enum ShiftStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum BagStatus {
+  COLLECTED
+  IN_TRANSIT
+  PLANT_RECEIVED
+  DISPOSED
+}
+
+// -------------------------------------------------------------
+// 0. AUTH & USER MODEL (Role-Based Access Control)
+// -------------------------------------------------------------
+model User {
+  id                  String               @id @default(uuid())
+  username            String               @unique
+  password            String
+  fullName            String               @map("full_name")
+  role                UserRole             @default(DRIVER)
+  driverId            String?              @unique @map("driver_id")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  driver              Driver?              @relation(fields: [driverId], references: [id])
+
+  @@map("users")
+}
+
+// -------------------------------------------------------------
+// 1. VEHICLE MODEL (Screen 1: Vehicle Registration)
+// -------------------------------------------------------------
+model Vehicle {
+  id                  String               @id @default(uuid())
+  vehicleNo           String               @unique @map("vehicle_no")
+  vehicleType         VehicleType          @map("vehicle_type")
+  qrCodePayload       String               @unique @map("qr_code_payload")
+  status              String               @default("ACTIVE")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  dailyMappings       DailyDriverMapping[]
+  collectedBags       CollectedBag[]
+
+  @@map("vehicles")
+}
+
+// -------------------------------------------------------------
+// 2. HOSPITAL MODEL (For Route stops & Bag collection)
+// -------------------------------------------------------------
+model Hospital {
+  id                  String               @id @default(uuid())
+  hospitalCode        String               @unique @map("hospital_code")
+  hospitalName        String               @map("hospital_name")
+  qrCodePayload       String               @unique @map("qr_code_payload")
+  address             String?
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  routeHospitals      RouteHospital[]
+  collectedBags       CollectedBag[]
+
+  @@map("hospitals")
+}
+
+// -------------------------------------------------------------
+// 3. ROUTE & ROUTE STOPS (Screen 2: Vehicle Route Map)
+// -------------------------------------------------------------
+model Route {
+  id                  String               @id @default(uuid())
+  routeName           String               @unique @map("route_name")
+  isActive            Boolean              @default(true) @map("is_active")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  routeHospitals      RouteHospital[]
+  dailyMappings       DailyDriverMapping[]
+  collectedBags       CollectedBag[]
+
+  @@map("routes")
+}
+
+model RouteHospital {
+  id                  String               @id @default(uuid())
+  routeId             String               @map("route_id")
+  hospitalId          String               @map("hospital_id")
+  stopSequence        Int                  @map("stop_sequence")
+  createdAt           DateTime             @default(now()) @map("created_at")
+
+  route               Route                @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  hospital            Hospital             @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, hospitalId])
+  @@map("route_hospitals")
+}
+
+// -------------------------------------------------------------
+// 4. DRIVER MODEL (Screen 3: Driver Registration)
+// -------------------------------------------------------------
+model Driver {
+  id                  String               @id @default(uuid())
+  driverCode          String               @unique @map("driver_code")
+  driverName          String               @map("driver_name")
+  mobileNo            String               @unique @map("mobile_no")
+  photoUrl            String?              @map("photo_url")
+  isActive            Boolean              @default(true) @map("is_active")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  user                User?
+  dailyMappings       DailyDriverMapping[]
+  collectedBags       CollectedBag[]
+
+  @@map("drivers")
+}
+
+// -------------------------------------------------------------
+// 5. DAILY DRIVER + VEHICLE + ROUTE MAPPING (Screen 4: Assignment)
+// -------------------------------------------------------------
+model DailyDriverMapping {
+  id                  String               @id @default(uuid())
+  driverId            String               @map("driver_id")
+  vehicleId           String               @map("vehicle_id")
+  routeId             String               @map("route_id")
+  shiftDate           DateTime             @default(now()) @map("shift_date")
+  status              ShiftStatus          @default(IN_PROGRESS)
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  driver              Driver               @relation(fields: [driverId], references: [id])
+  vehicle             Vehicle              @relation(fields: [vehicleId], references: [id])
+  route               Route                @relation(fields: [routeId], references: [id])
+  collectedBags       CollectedBag[]
+
+  @@map("daily_driver_mappings")
+}
+
+// -------------------------------------------------------------
+// 6. COLLECTED BAGS (Screen 5 & 6: Collection, Plant Receival, Disposal)
+// -------------------------------------------------------------
+model CollectedBag {
+  id                  String               @id @default(uuid())
+  bagQrCode           String               @map("bag_qr_code")
+  hospitalId          String               @map("hospital_id")
+  driverMappingId     String?              @map("driver_mapping_id")
+  driverId            String               @map("driver_id")
+  vehicleId           String               @map("vehicle_id")
+  routeId             String               @map("route_id")
+  
+  status              BagStatus            @default(COLLECTED)
+  collectedAt         DateTime             @default(now()) @map("collected_at")
+  plantReceivedAt     DateTime?            @map("plant_received_at")
+  disposedAt          DateTime?            @map("disposed_at")
+
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  hospital            Hospital             @relation(fields: [hospitalId], references: [id])
+  driverMapping       DailyDriverMapping?  @relation(fields: [driverMappingId], references: [id])
+  driver              Driver               @relation(fields: [driverId], references: [id])
+  vehicle             Vehicle              @relation(fields: [vehicleId], references: [id])
+  route               Route                @relation(fields: [routeId], references: [id])
+
+  @@index([vehicleId, status])
+  @@index([status])
+  @@map("collected_bags")
+}
